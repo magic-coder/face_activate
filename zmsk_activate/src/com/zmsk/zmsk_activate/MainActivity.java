@@ -4,6 +4,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 import com.alibaba.fastjson.JSON;
+import com.ys.myapi.MyManager;
 import com.zmsk.zmsk_activate.http.HttpUtlis;
 import com.zmsk.zmsk_activate.http.OnResponseListner;
 import com.zmsk.zmsk_activate.pojo.DeviceReturn;
@@ -13,6 +14,8 @@ import com.zmsk.zmsk_activate.utils.SDCardUtil;
 
 import android.app.Activity;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Message;
 import android.text.TextUtils;
 import android.view.View;
 import android.view.View.OnClickListener;
@@ -30,6 +33,10 @@ public class MainActivity extends Activity implements OnClickListener {
 
 	private EditText etAppSecret;
 
+	private MyManager manager;
+
+	private Handler handler;
+
 	@Override
 	protected void onCreate(Bundle savedInstanceState) {
 		super.onCreate(savedInstanceState);
@@ -42,34 +49,69 @@ public class MainActivity extends Activity implements OnClickListener {
 
 		etAppSecret = (EditText) this.findViewById(R.id.et_appSecret);
 
+		manager = MyManager.getInstance(this);
+
+		String macId = manager.getAndroidModle();
+
+		etAppSecret.setText(macId);
+
 		DeviceReturn device = readContentFromSDCard();
 
 		if (device != null) {
 			etAppId.setText(device.getFactoryCode());
-			etAppSecret.setText(device.getMacId());
+			// etAppSecret.setText(device.getMacId());
 		}
 
 		btSubmit.setOnClickListener(this);
+
+		handler = new Handler() {
+			public void handleMessage(android.os.Message msg) {
+				super.handleMessage(msg);
+				Bundle data = msg.getData();
+
+				if (TextUtils.isEmpty("")) {
+					Toast.makeText(MainActivity.this, "工厂没开启设备", Toast.LENGTH_LONG).show();
+					return;
+				}
+
+				String deviceReturn = data.getString("deviceReturn");
+
+				Toast.makeText(MainActivity.this, "deviceReturn:" + deviceReturn, Toast.LENGTH_LONG).show();
+
+				// 写入sdcard
+				wirteContent2SDCard(deviceReturn);
+			};
+		};
 
 	}
 
 	@Override
 	public void onClick(View v) {
 
-		String factoryCode = etAppId.getText().toString();
+		final String factoryCode = etAppId.getText().toString();
 
-		String macId = etAppSecret.getText().toString();
+		final String macId = etAppSecret.getText().toString();
 
 		if (TextUtils.isEmpty(factoryCode) || TextUtils.isEmpty(macId)) {
 			Toast.makeText(MainActivity.this, "输入的工程代码或板子物理地址为空", Toast.LENGTH_LONG).show();
 			return;
 		}
 
-		sendHttpRequest(factoryCode, macId);
+		new Thread(new Runnable() {
+
+			@Override
+			public void run() {
+				sendHttpRequest(factoryCode, macId);
+			}
+		}).start();
 
 	}
 
 	private void sendHttpRequest(String factoryCode, String macId) {
+
+		final Message msg = new Message();
+
+		final Bundle data = new Bundle();
 
 		String encryptFactoryCode = "";
 
@@ -94,25 +136,29 @@ public class MainActivity extends Activity implements OnClickListener {
 			@Override
 			public void onSucess(String response) {
 
-				HttpResult httpResult = JSON.parseObject(response, HttpResult.class);
-
-				Toast.makeText(MainActivity.this, "httpResult:" + httpResult.toString(), Toast.LENGTH_LONG).show();
-
 				DeviceReturn deviceReturn = parseHttpResult(response);
-
+				String deviceReturnStr = "";
 				if (deviceReturn != null) {
-					Toast.makeText(MainActivity.this, "deviceReturn:" + deviceReturn.toString(), Toast.LENGTH_LONG)
-							.show();
+					// Toast.makeText(MainActivity.this, "deviceReturn:" +
+					// deviceReturn.toString(), Toast.LENGTH_LONG)
+					// .show();
 
 					// 写入sdcard
-					writeContent2SDCard(deviceReturn);
+					// writeContent2SDCard(deviceReturn);
+					deviceReturnStr = deviceReturn.toString();
 				}
-
+				data.putString("deviceReturn", deviceReturnStr);
+				msg.setData(data);
+				handler.sendMessage(msg);
 			}
 
 			@Override
 			public void onError(String error) {
-				Toast.makeText(MainActivity.this, "error:" + error, Toast.LENGTH_LONG).show();
+				data.putString("error", error);
+				// Toast.makeText(MainActivity.this, "error:" + error,
+				// Toast.LENGTH_LONG).show();
+				msg.setData(data);
+				handler.sendMessage(msg);
 			}
 		});
 	}
@@ -143,6 +189,11 @@ public class MainActivity extends Activity implements OnClickListener {
 	private void writeContent2SDCard(DeviceReturn deviceReturn) {
 		// 写入sdcard
 		SDCardUtil.writeContent2SDCard("test.json", JSON.toJSONString(deviceReturn));
+	}
+
+	private void wirteContent2SDCard(String deviceReturnStr) {
+		// 写入sdcard
+		SDCardUtil.writeContent2SDCard("test.json", deviceReturnStr);
 	}
 
 	public DeviceReturn readContentFromSDCard() {
